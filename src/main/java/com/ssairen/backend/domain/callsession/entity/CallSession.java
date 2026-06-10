@@ -24,7 +24,13 @@ public class CallSession {
     private String deviceId;
 
     @Column(length = 30)
-    private String counterpartPhoneNumber;
+    private String phoneNumber;
+
+    @Column(nullable = false, length = 100)
+    private String victimName;
+
+    @Column(nullable = false)
+    private Integer victimAge;
 
     @Column(nullable = false)
     private OffsetDateTime startedAt;
@@ -57,14 +63,18 @@ public class CallSession {
             String id,
             String externalCallId,
             String deviceId,
-            String counterpartPhoneNumber,
+            String phoneNumber,
+            String victimName,
+            Integer victimAge,
             OffsetDateTime startedAt
     ) {
         OffsetDateTime now = OffsetDateTime.now();
         this.id = id;
         this.externalCallId = externalCallId;
         this.deviceId = deviceId;
-        this.counterpartPhoneNumber = counterpartPhoneNumber;
+        this.phoneNumber = phoneNumber;
+        this.victimName = victimName;
+        this.victimAge = victimAge;
         this.startedAt = startedAt;
         this.status = CallSessionStatus.ACTIVE;
         this.nextTranscriptSequence = 1L;
@@ -73,16 +83,11 @@ public class CallSession {
         this.updatedAt = now;
     }
 
-    /**
-     * 청크 저장이 성공한 뒤에만 호출한다.
-     * 이 메서드가 다음 sequence를 전진시키므로 DB 저장 실패 시 ACK가 먼저 나가는 상황을 막을 수 있다.
-     */
     public void acceptTranscript(int textLength) {
         this.nextTranscriptSequence++;
         this.accumulatedTranscriptCharacters += textLength;
         this.updatedAt = OffsetDateTime.now();
     }
-
     public void startCompleting(OffsetDateTime endedAt) {
         this.status = CallSessionStatus.COMPLETING;
         this.endedAt = endedAt;
@@ -125,3 +130,4 @@ public class CallSession {
         return accumulatedTranscriptCharacters;
     }
 }
+

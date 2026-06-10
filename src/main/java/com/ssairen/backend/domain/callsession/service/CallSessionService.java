@@ -17,13 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-/**
- * Flutter 통화 세션과 STT 청크의 영속 상태를 관리한다.
- *
- * WebSocket은 연결이 끊기거나 동일 메시지가 다시 전송될 수 있으므로 메모리의 연결 상태를 신뢰하지 않는다.
- * 다음에 받을 sequence와 이미 저장된 청크는 항상 DB를 기준으로 판단하며, 같은 세션에 대한 동시 요청은
- * 비관적 잠금으로 직렬화한다.
- */
 public class CallSessionService {
 
     private final CallSessionRepository callSessionRepository;
@@ -41,15 +34,17 @@ public class CallSessionService {
     }
 
     @Transactional
-    public CallSessionResponse createSession(CreateCallSessionRequest request, String deviceId) {
+    public CallSessionResponse createSession(CreateCallSessionRequest request) {
         return callSessionRepository.findByExternalCallId(request.externalCallId())
                 .map(CallSessionResponse::from)
                 .orElseGet(() -> {
                     CallSession session = new CallSession(
                             UUID.randomUUID().toString(),
                             request.externalCallId(),
-                            deviceId,
-                            request.counterpartPhoneNumber(),
+                            request.deviceId(),
+                            request.phoneNumber(),
+                            request.victim().name(),
+                            request.victim().age(),
                             request.startedAt()
                     );
                     return CallSessionResponse.from(callSessionRepository.save(session));
@@ -61,10 +56,6 @@ public class CallSessionService {
         return CallSessionResponse.from(findSession(sessionId));
     }
 
-    /**
-     * 청크 저장과 nextSequence 증가를 하나의 트랜잭션으로 묶는다.
-     * 반환 이후 WebSocket 핸들러가 ACK를 보내므로, ACK는 DB 반영이 성공했다는 의미가 된다.
-     */
     @Transactional
     public TranscriptAcceptResult acceptTranscript(
             String sessionId,
@@ -78,7 +69,7 @@ public class CallSessionService {
         CallSession session = findSessionForUpdate(sessionId);
 
         if (!session.isAcceptingTranscript()) {
-            throw new BusinessException(ErrorCode.CALL_SESSION_COMPLETED, "종료 중이거나 종료된 통화 세션입니다.");
+            throw new BusinessException(ErrorCode.CALL_SESSION_COMPLETED, "??? ?????? ???????? ????????");
         }
 
         long expectedSequence = session.getNextTranscriptSequence();
@@ -89,10 +80,10 @@ public class CallSessionService {
             throw sequenceMismatch(expectedSequence);
         }
         if (text == null || text.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "STT 텍스트는 비어 있을 수 없습니다.");
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "STT ?????? ??? ??? ????????.");
         }
         if (startedAtMs < 0 || endedAtMs < startedAtMs) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "STT 시간 구간이 올바르지 않습니다.");
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "STT ??? ??????????? ??????.");
         }
 
         TranscriptChunk chunk = new TranscriptChunk(
@@ -143,7 +134,7 @@ public class CallSessionService {
         if (!storedChunk.hasSamePayload(chunkId, text)) {
             throw new BusinessException(
                     ErrorCode.DUPLICATE_TRANSCRIPT_CONFLICT,
-                    "이미 저장된 sequence와 다른 청크가 수신되었습니다.",
+                    "??? ????? sequence????? ????? ?????????.",
                     Map.of("sequence", sequence)
             );
         }
@@ -153,18 +144,19 @@ public class CallSessionService {
     private BusinessException sequenceMismatch(long expectedSequence) {
         return new BusinessException(
                 ErrorCode.TRANSCRIPT_SEQUENCE_MISMATCH,
-                "STT 청크 sequence가 올바르지 않습니다.",
+                "STT ??? sequence?? ?????? ??????.",
                 Map.of("expectedSequence", expectedSequence)
         );
     }
 
     private CallSession findSession(String sessionId) {
         return callSessionRepository.findById(sessionId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.CALL_SESSION_NOT_FOUND, "통화 세션을 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.CALL_SESSION_NOT_FOUND, "??? ???????? ????????."));
     }
 
     private CallSession findSessionForUpdate(String sessionId) {
         return callSessionRepository.findByIdForUpdate(sessionId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.CALL_SESSION_NOT_FOUND, "통화 세션을 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.CALL_SESSION_NOT_FOUND, "??? ???????? ????????."));
     }
 }
+

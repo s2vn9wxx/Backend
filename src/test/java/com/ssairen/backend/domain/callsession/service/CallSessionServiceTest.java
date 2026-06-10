@@ -36,25 +36,25 @@ class CallSessionServiceTest {
     }
 
     @Test
-    void 같은_외부_통화_ID로_재요청하면_기존_세션을_반환한다() {
+    void ???_???_???_ID?????????????_???????????() {
         CreateCallSessionRequest request = request("external-call-1");
 
-        CallSessionResponse first = callSessionService.createSession(request, "device-1");
-        CallSessionResponse second = callSessionService.createSession(request, "device-1");
+        CallSessionResponse first = callSessionService.createSession(request);
+        CallSessionResponse second = callSessionService.createSession(request);
 
         assertThat(second.sessionId()).isEqualTo(first.sessionId());
         assertThat(callSessionRepository.count()).isEqualTo(1);
     }
 
     @Test
-    void STT_청크를_순서대로_저장하고_다음_sequence를_반환한다() {
+    void STT_??????????????????????_sequence????????() {
         String sessionId = createSession();
 
         TranscriptAcceptResult result = callSessionService.acceptTranscript(
                 sessionId,
                 "chunk-1",
                 1,
-                "검찰 수사관입니다",
+                "??????????????,
                 0,
                 1000,
                 true
@@ -67,15 +67,15 @@ class CallSessionServiceTest {
     }
 
     @Test
-    void 동일한_청크를_재전송하면_중복_저장하지_않고_ACK_가능한_결과를_반환한다() {
+    void ?????????????????????_???????_???_ACK_?????_???????????() {
         String sessionId = createSession();
-        callSessionService.acceptTranscript(sessionId, "chunk-1", 1, "동일 텍스트", 0, 1000, true);
+        callSessionService.acceptTranscript(sessionId, "chunk-1", 1, "??? ?????, 0, 1000, true);
 
         TranscriptAcceptResult duplicate = callSessionService.acceptTranscript(
                 sessionId,
                 "chunk-1",
                 1,
-                "동일 텍스트",
+                "??? ?????,
                 0,
                 1000,
                 true
@@ -87,14 +87,14 @@ class CallSessionServiceTest {
     }
 
     @Test
-    void 기대_sequence보다_큰_청크는_거부한다() {
+    void ???_sequence???_?????????????() {
         String sessionId = createSession();
 
         assertThatThrownBy(() -> callSessionService.acceptTranscript(
                 sessionId,
                 "chunk-2",
                 2,
-                "첫 청크가 누락됨",
+                "??????? ?????,
                 1000,
                 2000,
                 true
@@ -106,9 +106,9 @@ class CallSessionServiceTest {
     }
 
     @Test
-    void 마지막_sequence까지_저장한_후_세션을_종료한다() {
+    void ?????sequence???_??????????????????_????????_???_???????????() {
         String sessionId = createSession();
-        callSessionService.acceptTranscript(sessionId, "chunk-1", 1, "마지막 청크", 0, 1000, true);
+        callSessionService.acceptTranscript(sessionId, "chunk-1", 1, "????????", 0, 1000, true);
 
         CallSessionResponse completed = callSessionService.completeSession(sessionId, OffsetDateTime.now(), 1);
 
@@ -117,7 +117,7 @@ class CallSessionServiceTest {
                 sessionId,
                 "chunk-2",
                 2,
-                "종료 후 청크",
+                "??? ?????",
                 1000,
                 2000,
                 true
@@ -128,10 +128,17 @@ class CallSessionServiceTest {
     }
 
     private String createSession() {
-        return callSessionService.createSession(request("external-call-" + System.nanoTime()), "device-1").sessionId();
+        return callSessionService.createSession(request("external-call-" + System.nanoTime())).sessionId();
     }
 
     private CreateCallSessionRequest request(String externalCallId) {
-        return new CreateCallSessionRequest(externalCallId, OffsetDateTime.now(), "01012345678");
+        return new CreateCallSessionRequest(
+                externalCallId,
+                "device-1",
+                OffsetDateTime.now(),
+                "01012345678",
+                new CreateCallSessionRequest.VictimRequest("??OO", 71)
+        );
     }
 }
+

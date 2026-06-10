@@ -19,13 +19,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/mobile/call-sessions")
-@Tag(name = "?? ??", description = "Flutter ??? ?? ?? ???? ?? API")
+@Tag(name = "??? ???", description = "Flutter ???????? ??? ?????? ??? API")
 public class CallSessionController {
 
     private final CallSessionService callSessionService;
@@ -36,56 +35,60 @@ public class CallSessionController {
 
     @PostMapping
     @Operation(
-            summary = "?? ?? ??",
-            description = "Flutter ?? ?? ???? ?? ? ?????. ?? externalCallId? ????? ?? ??? ?????."
+            summary = "??? ??? ???",
+            description = "Flutter ??? ??? ?????? ??? ?????????? ??? externalCallId????????????? ?????????????"
     )
     @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "?? ?? ?? ?? ?? ?? ??"),
+            @ApiResponse(responseCode = "201", description = "??? ??? ??? ??? ??? ??? ???"),
             @ApiResponse(
                     responseCode = "400",
-                    description = "?? ? ?? ??",
+                    description = "??? ?????????",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
     public ResponseEntity<CallSessionResponse> createSession(
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
-                    description = "Flutter? ??? ?? ?? ID? ?? ?? ??",
+                    description = "Flutter?? ???????? ??? ID?? ??? ??? ???",
                     required = true,
                     content = @Content(
                             schema = @Schema(implementation = CreateCallSessionRequest.class),
                             examples = @ExampleObject(value = """
                                     {
                                       "externalCallId": "device-call-001",
+                                      "deviceId": "victim-device-001",
                                       "startedAt": "2026-06-10T15:20:00+09:00",
-                                      "counterpartPhoneNumber": "01012345678"
+                                      "phoneNumber": "01012345678",
+                                      "victim": {
+                                        "name": "??OO",
+                                        "age": 71
+                                      }
                                     }
                                     """)
                     )
             )
-            @Valid @RequestBody CreateCallSessionRequest request,
-            @Parameter(description = "Flutter ?? ?? ???", example = "victim-device-001")
-            @RequestHeader(value = "X-Device-Id", defaultValue = "demo-device") String deviceId
+            @Valid @RequestBody CreateCallSessionRequest request
     ) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(callSessionService.createSession(request, deviceId));
+        return ResponseEntity.status(HttpStatus.CREATED).body(callSessionService.createSession(request));
     }
 
     @GetMapping("/{sessionId}")
     @Operation(
-            summary = "?? ?? ?? ??",
-            description = "Flutter ?? ?????? WebSocket? ???? ? ??? ?? sequence? ?? ??? ?????."
+            summary = "??? ??? ??? ???",
+            description = "Flutter ??? ????????? WebSocket???????? ?????????? sequence?? ??? ?????????????"
     )
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "?? ?? ?? ?? ??"),
+            @ApiResponse(responseCode = "200", description = "??? ??? ??? ??? ???"),
             @ApiResponse(
                     responseCode = "404",
-                    description = "?? ??? ?? ? ??",
+                    description = "??? ???????? ?????",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
     public CallSessionResponse getSession(
-            @Parameter(description = "?? ?? ID", example = "550e8400-e29b-41d4-a716-446655440000")
+            @Parameter(description = "??? ??? ID", example = "550e8400-e29b-41d4-a716-446655440000")
             @PathVariable String sessionId
     ) {
         return callSessionService.getSession(sessionId);
     }
 }
+
