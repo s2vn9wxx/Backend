@@ -15,9 +15,11 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import lombok.Getter;
 
 @Entity
 @Table(name = "cases")
+@Getter
 public class FraudCase {
 
     /*
