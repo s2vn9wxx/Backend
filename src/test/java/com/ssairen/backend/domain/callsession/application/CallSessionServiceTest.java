@@ -1,15 +1,15 @@
-package com.ssairen.backend.domain.callsession.service;
+package com.ssairen.backend.domain.callsession.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.ssairen.backend.domain.callsession.dto.CallSessionResponse;
-import com.ssairen.backend.domain.callsession.dto.CreateCallSessionRequest;
-import com.ssairen.backend.domain.callsession.dto.SessionCompletionResult;
-import com.ssairen.backend.domain.callsession.dto.TranscriptAcceptResult;
+import com.ssairen.backend.domain.callsession.api.dto.CallSessionResponse;
+import com.ssairen.backend.domain.callsession.api.dto.CreateCallSessionRequest;
+import com.ssairen.backend.domain.callsession.api.dto.SessionCompletionResult;
 import com.ssairen.backend.domain.callsession.entity.CallSessionStatus;
 import com.ssairen.backend.domain.callsession.repository.CallSessionRepository;
 import com.ssairen.backend.domain.callsession.repository.TranscriptChunkRepository;
+import com.ssairen.backend.domain.callsession.websocket.dto.TranscriptAcceptResult;
 import com.ssairen.backend.domain.casefile.repository.FraudCaseRepository;
 import com.ssairen.backend.domain.user.repository.UserRepository;
 import com.ssairen.backend.global.error.BusinessException;

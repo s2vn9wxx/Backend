@@ -25,37 +25,37 @@ public class SwaggerConfig {
                 .info(new Info()
                         .title("SSAIREN Flutter - Spring Boot API")
                         .description("""
-                                Flutter 피해자 앱과 Spring Boot 사이의 통화 세션 및 STT WebSocket 계약입니다.
+                                Flutter 피해자 앱과 Spring Boot 사이의 통화 세션 및 STT WebSocket 계약 문서입니다.
 
                                 - REST API: 통화 세션 생성 및 상태 복구
-                                - WebSocket: STT 청크 전송, ACK/NACK, 통화 종료
-                                - FastAPI 및 경찰 Dashboard 연동은 현재 문서 범위에 포함하지 않습니다.
+                                - WebSocket: STT 청크 전송, ACK/NACK, 분석 결과, 통화 종료
+                                - FastAPI와 관리자 대시보드 연동 규격은 현재 문서 범위에 포함하지 않습니다.
                                 """)
                         .version("v1.0.0"))
                 .tags(List.of(
                         new Tag().name("통화 세션").description("Flutter 통화 세션 생성 및 상태 조회"),
-                        new Tag().name("피해자 WebSocket").description("Flutter 피해자 앱 양방향 WebSocket 메시지 계약")
+                        new Tag().name("피해자 WebSocket").description("Flutter 피해자 앱과 백엔드 사이의 WebSocket 메시지 계약")
                 ))
                 .paths(webSocketPaths());
     }
 
     /**
-     * OpenAPI는 WebSocket 메시지 프로토콜을 직접 표현하지 못한다.
-     * Swagger UI에서 Flutter 개발자가 연결 주소와 송수신 예시를 확인할 수 있도록
-     * handshake 경로를 문서 전용 PathItem으로 등록한다.
+     * OpenAPI는 WebSocket 메시지 프로토콜을 완전하게 표현하지 못한다.
+     * 그래서 Swagger UI에서라도 Flutter 개발자가 handshake 주소와 필수 파라미터,
+     * 대표 송수신 예시를 바로 확인할 수 있도록 문서용 PathItem을 수동 등록한다.
      */
     private Paths webSocketPaths() {
         Operation operation = new Operation()
                 .tags(List.of("피해자 WebSocket"))
-                .summary("피해자 앱 STT 양방향 WebSocket 연결")
+                .summary("피해자 앱용 STT 업로드 WebSocket 연결")
                 .description("""
                         연결 주소: `ws://{host}/ws/v1/victim?sessionId={sessionId}`
 
-                        Swagger UI의 Try it out으로 WebSocket 연결을 실행할 수는 없습니다.
+                        Swagger UI의 Try it out 으로는 WebSocket 연결을 직접 실행할 수 없습니다.
 
-                        연결 직후 서버는 `SESSION_READY` 이벤트로 다음 STT sequence를 전달합니다.
+                        연결 직후 서버는 `SESSION_READY` 이벤트로 다음 STT sequence를 내려줍니다.
                         Flutter는 `TRANSCRIPT_CHUNK`, `SESSION_COMPLETE`, `PING` 이벤트를 전송합니다.
-                        서버는 `TRANSCRIPT_ACK`, `TRANSCRIPT_NACK`, `SESSION_COMPLETE_ACK`, `PONG` 이벤트를 반환합니다.
+                        서버는 `TRANSCRIPT_ACK`, `TRANSCRIPT_NACK`, `ANALYSIS_RESULT`, `ANALYSIS_ERROR`, `SESSION_COMPLETE_ACK`, `PONG` 이벤트를 반환합니다.
                         """)
                 .addParametersItem(new Parameter()
                         .name("sessionId")
@@ -102,7 +102,7 @@ public class SwaggerConfig {
 
     private Example transcriptAckExample() {
         return new Example()
-                .summary("STT 청크 DB 저장 완료 ACK")
+                .summary("STT 청크 저장 완료 ACK")
                 .value("""
                         {
                           "eventId": "server-event-001",

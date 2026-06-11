@@ -15,6 +15,7 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "cases")
@@ -91,6 +92,24 @@ public class FraudCase {
         if (this.callDurationSec == null || progressedSeconds > this.callDurationSec) {
             this.callDurationSec = progressedSeconds;
         }
+    }
+
+    public void applyAnalysisResult(
+            Integer riskScore,
+            PhishingType phishingType,
+            String aiSummary,
+            List<String> keywords
+    ) {
+        /*
+         * 분석기는 매 청크마다 최신 판단을 돌려주므로
+         * case에는 가장 최근 분석 결과를 덮어쓰는 방식으로 유지한다.
+         */
+        if (riskScore != null) {
+            this.riskScore = Math.max(0, Math.min(100, riskScore));
+        }
+        this.phishingType = phishingType;
+        this.aiSummary = aiSummary;
+        this.keywords = (keywords == null || keywords.isEmpty()) ? null : String.join(",", keywords);
     }
 
     public void complete(OffsetDateTime startedAt, OffsetDateTime endedAt) {

@@ -1,13 +1,13 @@
-package com.ssairen.backend.domain.callsession.service;
+package com.ssairen.backend.domain.callsession.application;
 
-import com.ssairen.backend.domain.callsession.dto.CallSessionResponse;
-import com.ssairen.backend.domain.callsession.dto.CreateCallSessionRequest;
-import com.ssairen.backend.domain.callsession.dto.SessionCompletionResult;
-import com.ssairen.backend.domain.callsession.dto.TranscriptAcceptResult;
+import com.ssairen.backend.domain.callsession.api.dto.CallSessionResponse;
+import com.ssairen.backend.domain.callsession.api.dto.CreateCallSessionRequest;
+import com.ssairen.backend.domain.callsession.api.dto.SessionCompletionResult;
 import com.ssairen.backend.domain.callsession.entity.CallSession;
 import com.ssairen.backend.domain.callsession.entity.TranscriptChunk;
 import com.ssairen.backend.domain.callsession.repository.CallSessionRepository;
 import com.ssairen.backend.domain.callsession.repository.TranscriptChunkRepository;
+import com.ssairen.backend.domain.callsession.websocket.dto.TranscriptAcceptResult;
 import com.ssairen.backend.domain.casefile.entity.FraudCase;
 import com.ssairen.backend.domain.casefile.repository.FraudCaseRepository;
 import com.ssairen.backend.domain.user.entity.User;
@@ -26,9 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class CallSessionService {
 
     /*
-     * 이 서비스는 Flutter와의 실시간 통신 관점에서 "통화 세션"을 관리한다.
-     * 다만 실제 비즈니스 데이터는 ERD 기준으로 users / cases 테이블에 저장하고,
-     * call_sessions / transcript_chunks는 WebSocket 제어와 순서 보장을 위한 기술 테이블로 사용한다.
+     * 이 서비스는 Flutter와 주고받는 "통화 세션"의 수명주기를 관리한다.
+     * 실제 업무 중심 데이터는 ERD에 맞춰 users, cases 테이블에 저장하고,
+     * call_sessions, transcript_chunks 는 실시간 업로드 순서 제어를 위한 기술 테이블로 유지한다.
+     * 덕분에 피해자/사건 도메인과 모바일 전송 제어 로직을 분리할 수 있다.
      */
     private final CallSessionRepository callSessionRepository;
     private final TranscriptChunkRepository transcriptChunkRepository;
@@ -36,8 +37,9 @@ public class CallSessionService {
     private final FraudCaseRepository fraudCaseRepository;
 
     /*
-     * 현재 구현에서는 실제 AI 분석 큐를 붙이지 않았으므로
-     * "분석을 돌릴 만큼 텍스트가 충분히 누적됐는지"를 문자 수 기준으로만 판단한다.
+     * transcript가 어느 정도 누적되었을 때 "분석해볼 만한 길이인지" 판단하는 기준이다.
+     * 현재는 누적 문자 수로만 판단하고,
+     * 실제 OpenAI/FastAPI 호출 자체는 WebSocket 수신 직후 청크 단위로 수행한다.
      */
     private final long analysisThresholdCharacters;
 
@@ -61,9 +63,9 @@ public class CallSessionService {
                 .map(CallSessionResponse::from)
                 .orElseGet(() -> {
                     /*
-                     * 세션 생성 시점에 피해자 정보는 users 테이블에,
-                     * 탐지 진행 단위는 cases 테이블에 먼저 만든다.
-                     * 그 뒤 둘을 참조하는 기술 세션을 call_sessions에 저장한다.
+                     * 세션을 만들기 전에 피해자(user)와 사건(case)을 먼저 생성한다.
+                     * 이렇게 해야 transcript 분석 결과가 들어왔을 때
+                     * 별도 변환 없이 바로 ERD 기준 엔티티에 반영할 수 있다.
                      */
                     User victim = resolveVictim(request);
                     FraudCase fraudCase = fraudCaseRepository.save(new FraudCase(victim, request.startedAt()));
@@ -96,22 +98,23 @@ public class CallSessionService {
     ) {
         CallSession session = findSessionForUpdate(sessionId);
 
-        // 종료된 세션은 더 이상 STT를 받지 않는다.
+        // 종료된 세션은 더 이상 transcript를 받지 않는다.
         if (!session.isAcceptingTranscript()) {
-            throw new BusinessException(ErrorCode.CALL_SESSION_COMPLETED, "종료 중이거나 종료된 통화 세션입니다.");
+            throw new BusinessException(ErrorCode.CALL_SESSION_COMPLETED, "종료 중이거나 이미 종료된 통화 세션입니다.");
         }
 
         long expectedSequence = session.getNextTranscriptSequence();
 
         /*
-         * 기대 sequence보다 작은 값은 대부분 재전송이다.
-         * 이 경우 바로 실패시키지 않고, 같은 chunk가 이미 저장되어 있는지 확인해 멱등 처리한다.
+         * 기대 sequence보다 작은 값은 대체로 재전송이다.
+         * 같은 chunk가 이미 저장된 정상 재전송인지 먼저 확인하고,
+         * 실제 충돌일 때만 예외를 던져 Flutter가 복구 판단을 하게 만든다.
          */
         if (sequence < expectedSequence) {
             return handlePossibleDuplicate(sessionId, chunkId, sequence, text, expectedSequence);
         }
 
-        // 기대 sequence보다 크면 중간 청크가 누락된 것이므로 복구가 필요하다.
+        // 기대 sequence보다 큰 값이면 중간 청크 유실이므로 복구가 필요하다.
         if (sequence > expectedSequence) {
             throw sequenceMismatch(expectedSequence);
         }
@@ -135,8 +138,8 @@ public class CallSessionService {
         transcriptChunkRepository.save(chunk);
 
         /*
-         * sequence 증가와 누적 문자 수 갱신은 반드시 DB 저장 이후에만 일어난다.
-         * 그래야 "실제로는 저장 실패했는데 ACK만 먼저 나간 상태"를 막을 수 있다.
+         * 저장이 끝난 뒤에만 sequence와 누적 문자 수를 증가시킨다.
+         * 그래야 DB 저장은 실패했는데 ACK만 나간 상태를 막을 수 있다.
          */
         session.acceptTranscript(endedAtMs, text.length());
 
@@ -154,8 +157,9 @@ public class CallSessionService {
         CallSession session = findSessionForUpdate(sessionId);
 
         /*
-         * Flutter가 "마지막으로 보냈다"고 주장하는 sequence와
-         * 서버가 실제 저장한 마지막 sequence가 다르면 종료 직전 누락 청크가 있다는 뜻이다.
+         * Flutter가 마지막으로 보냈다고 주장하는 sequence와
+         * 서버가 실제 저장한 마지막 sequence가 다르면 종료 직전 유실이 발생한 것이다.
+         * 이 경우 세션 종료를 허용하지 않고 먼저 sequence 불일치를 알려준다.
          */
         long lastStoredSequence = session.getNextTranscriptSequence() - 1;
         if (lastStoredSequence != lastTranscriptSequence) {
@@ -165,12 +169,13 @@ public class CallSessionService {
         boolean finalAnalysisQueued = false;
         if (session.isAcceptingTranscript()) {
             /*
-             * 실제 분석 작업 큐는 아직 단순화되어 있지만,
-             * 마지막 분석이 필요하다는 상태 자체는 세션에 남겨 후속 처리 지점을 만든다.
+             * 마지막 분석이 필요한지 여부를 세션 상태에 남겨 둔다.
+             * 지금은 단순 플래그지만, 이후 배치나 이벤트 기반 후처리로 바뀌어도
+             * "마무리 분석 대기 중인 통화"를 도메인 상태만으로 판별할 수 있다.
              */
             finalAnalysisQueued = session.queueFinalAnalysisIfNeeded(lastStoredSequence);
 
-            // 세션 종료와 함께 연결된 case도 완료 상태로 정리된다.
+            // 세션 종료와 함께 연결된 사건도 완료 상태로 정리한다.
             session.complete(endedAt);
         }
 
@@ -185,20 +190,20 @@ public class CallSessionService {
             long expectedSequence
     ) {
         /*
-         * 이미 저장된 sequence가 실제로 존재하는지 먼저 확인한다.
-         * 존재하지 않으면 단순 중복이 아니라 클라이언트/서버 상태가 어긋난 것이다.
+         * 같은 sequence가 이미 저장돼 있는지 먼저 확인한다.
+         * 없다면 단순 재전송이 아니라 클라이언트와 서버 상태가 어긋난 것이다.
          */
         TranscriptChunk storedChunk = transcriptChunkRepository.findByCallSessionIdAndSequence(sessionId, sequence)
                 .orElseThrow(() -> sequenceMismatch(expectedSequence));
 
         /*
-         * 같은 sequence인데 payload가 다르면 재전송이 아니라 충돌이다.
-         * 이 경우는 잘못된 청크가 덮어씌워지는 것을 막기 위해 거부한다.
+         * sequence는 같지만 payload가 다르면 정상 재전송이 아니라 충돌이다.
+         * 이 상황을 허용하면 동일 sequence에 서로 다른 STT 결과가 섞일 수 있으므로 거절한다.
          */
         if (!storedChunk.hasSamePayload(chunkId, text)) {
             throw new BusinessException(
                     ErrorCode.DUPLICATE_TRANSCRIPT_CONFLICT,
-                    "이미 저장한 sequence에 다른 청크가 수신됐습니다.",
+                    "이미 저장된 sequence에 다른 chunk payload가 도착했습니다.",
                     Map.of("sequence", sequence)
             );
         }
@@ -208,8 +213,9 @@ public class CallSessionService {
 
     private User resolveVictim(CreateCallSessionRequest request) {
         /*
-         * 전화번호가 있으면 같은 피해자를 재사용하기 가장 쉬우므로
-         * 이름 + 역할 + 전화번호 조합으로 먼저 조회한다.
+         * 전화번호가 있으면 같은 피해자일 가능성이 높으므로
+         * 이름 + 역할 + 전화번호로 먼저 조회해 기존 row를 재사용한다.
+         * 세션이 여러 번 열려도 피해자 엔티티가 과도하게 중복 생성되지 않게 하기 위함이다.
          */
         if (request.phoneNumber() != null && !request.phoneNumber().isBlank()) {
             return userRepository.findFirstByNameAndRoleAndPhone(
@@ -218,7 +224,7 @@ public class CallSessionService {
                             request.phoneNumber()
                     )
                     .map(existing -> {
-                        // 이미 있는 피해자면 최신 나이/전화번호로 보정한다.
+                        // 기존 피해자라면 최신 나이/전화번호로 프로필을 보정한다.
                         existing.updateVictimProfile(request.victim().age(), request.phoneNumber());
                         return existing;
                     })
@@ -230,7 +236,7 @@ public class CallSessionService {
                     )));
         }
 
-        // 전화번호가 없으면 완전한 중복 판별이 어렵기 때문에 새 row를 만든다.
+        // 전화번호가 없으면 중복 판별 근거가 약하므로 새 피해자 row를 생성한다.
         return userRepository.save(new User(
                 request.victim().name(),
                 UserRole.VICTIM,

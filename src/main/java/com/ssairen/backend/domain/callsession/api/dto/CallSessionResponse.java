@@ -1,4 +1,4 @@
-package com.ssairen.backend.domain.callsession.dto;
+package com.ssairen.backend.domain.callsession.api.dto;
 
 import com.ssairen.backend.domain.callsession.entity.CallSession;
 import com.ssairen.backend.domain.callsession.entity.CallSessionStatus;

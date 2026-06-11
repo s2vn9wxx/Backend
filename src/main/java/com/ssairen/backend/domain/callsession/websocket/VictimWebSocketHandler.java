@@ -1,15 +1,17 @@
-package com.ssairen.backend.domain.callsession.controller;
+package com.ssairen.backend.domain.callsession.websocket;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ssairen.backend.domain.callsession.dto.CallSessionResponse;
-import com.ssairen.backend.domain.callsession.dto.SessionCompletePayload;
-import com.ssairen.backend.domain.callsession.dto.SessionCompletionResult;
-import com.ssairen.backend.domain.callsession.dto.TranscriptAcceptResult;
-import com.ssairen.backend.domain.callsession.dto.TranscriptChunkPayload;
-import com.ssairen.backend.domain.callsession.dto.VictimClientEvent;
-import com.ssairen.backend.domain.callsession.dto.VictimServerEvent;
-import com.ssairen.backend.domain.callsession.service.CallSessionService;
+import com.ssairen.backend.domain.callsession.analysis.TranscriptAnalysisService;
+import com.ssairen.backend.domain.callsession.analysis.dto.TranscriptAnalysisResult;
+import com.ssairen.backend.domain.callsession.api.dto.CallSessionResponse;
+import com.ssairen.backend.domain.callsession.api.dto.SessionCompletionResult;
+import com.ssairen.backend.domain.callsession.application.CallSessionService;
+import com.ssairen.backend.domain.callsession.websocket.dto.SessionCompletePayload;
+import com.ssairen.backend.domain.callsession.websocket.dto.TranscriptAcceptResult;
+import com.ssairen.backend.domain.callsession.websocket.dto.TranscriptChunkPayload;
+import com.ssairen.backend.domain.callsession.websocket.dto.VictimClientEvent;
+import com.ssairen.backend.domain.callsession.websocket.dto.VictimServerEvent;
 import com.ssairen.backend.global.error.BusinessException;
 import com.ssairen.backend.global.error.ErrorCode;
 import java.io.IOException;
@@ -25,17 +27,24 @@ import org.springframework.web.util.UriComponentsBuilder;
 public class VictimWebSocketHandler extends TextWebSocketHandler {
 
     /*
-     * WebSocket 연결 객체는 메모리 안에서만 살아 있으므로
-     * 연결 직후 세션 attribute에 callSessionId를 묶어 이후 메시지의 소속 세션을 검증한다.
+     * WebSocket 연결 객체는 메모리 안에서만 유지되므로
+     * handshake 직후 session attribute에 callSessionId를 묶어 둔다.
+     * 이후 들어오는 모든 메시지는 이 값과 대조해 다른 세션 오염을 막는다.
      */
     private static final String SESSION_ID_ATTRIBUTE = "callSessionId";
 
     private final ObjectMapper objectMapper;
     private final CallSessionService callSessionService;
+    private final TranscriptAnalysisService transcriptAnalysisService;
 
-    public VictimWebSocketHandler(ObjectMapper objectMapper, CallSessionService callSessionService) {
+    public VictimWebSocketHandler(
+            ObjectMapper objectMapper,
+            CallSessionService callSessionService,
+            TranscriptAnalysisService transcriptAnalysisService
+    ) {
         this.objectMapper = objectMapper;
         this.callSessionService = callSessionService;
+        this.transcriptAnalysisService = transcriptAnalysisService;
     }
 
     @Override
@@ -44,7 +53,7 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
         CallSessionResponse callSession = callSessionService.getSession(callSessionId);
         session.getAttributes().put(SESSION_ID_ATTRIBUTE, callSessionId);
 
-        // Flutter는 이 값을 기준으로 끊긴 지점부터 안전하게 재전송할 수 있다.
+        // Flutter는 이 값을 기준으로 다음 transcript sequence를 이어서 보내면 된다.
         sendEvent(session, VictimServerEvent.of(
                 "SESSION_READY",
                 callSessionId,
@@ -84,7 +93,7 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
         TranscriptChunkPayload payload = objectMapper.treeToValue(event.data(), TranscriptChunkPayload.class);
         validateTranscriptPayload(payload);
 
-        // 저장, sequence 증가, case 진행 시간 반영은 모두 서비스 계층에서 처리한다.
+        // transcript 저장과 sequence 증가는 서비스 계층에서 트랜잭션으로 묶어 처리한다.
         TranscriptAcceptResult result = callSessionService.acceptTranscript(
                 event.sessionId(),
                 payload.chunkId(),
@@ -106,6 +115,46 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
                         "analysisThresholdReached", result.analysisThresholdReached()
                 )
         ));
+
+        /*
+         * Flutter는 약 5초 단위로 텍스트 청크를 계속 보낸다.
+         * 따라서 청크가 정상 저장될 때마다 곧바로 분석을 시도하고,
+         * 분석 결과도 별도 이벤트로 다시 돌려줘야 UI가 지연 없이 반응할 수 있다.
+         * 현재 라우터 기본값은 openai이며, 설정 한 줄만 바꾸면 fastapi로 전환 가능하다.
+         */
+        try {
+            TranscriptAnalysisResult analysisResult = transcriptAnalysisService.analyzeChunk(
+                    event.sessionId(),
+                    payload.sequence(),
+                    payload.text()
+            );
+
+            sendEvent(session, VictimServerEvent.of(
+                    "ANALYSIS_RESULT",
+                    event.sessionId(),
+                    Map.of(
+                            "chunkId", payload.chunkId(),
+                            "sequence", payload.sequence(),
+                            "riskScore", analysisResult.riskScore(),
+                            "phishingType", analysisResult.phishingType(),
+                            "aiSummary", analysisResult.aiSummary(),
+                            "keywords", analysisResult.keywords(),
+                            "provider", analysisResult.provider()
+                    )
+            ));
+        } catch (BusinessException exception) {
+            sendEvent(session, VictimServerEvent.of(
+                    "ANALYSIS_ERROR",
+                    event.sessionId(),
+                    Map.of(
+                            "chunkId", payload.chunkId(),
+                            "sequence", payload.sequence(),
+                            "reason", exception.getErrorCode().name(),
+                            "message", exception.getMessage(),
+                            "details", exception.getDetails()
+                    )
+            ));
+        }
     }
 
     private void handleSessionComplete(WebSocketSession session, VictimClientEvent event) throws IOException {
@@ -115,8 +164,8 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
         }
 
         /*
-         * 종료 ACK에는 세션 상태와 함께
-         * 마지막 분석이 필요한지 여부도 넣어 Flutter가 후속 상태를 표현할 수 있게 한다.
+         * 종료 ACK에는 최종 상태와 마지막 분석 필요 여부를 함께 담는다.
+         * Flutter는 이 응답만으로도 종료 성공 여부와 후처리 대기 상태를 구분할 수 있다.
          */
         SessionCompletionResult result = callSessionService.completeSession(
                 event.sessionId(),
@@ -179,7 +228,7 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
                 .getQueryParams()
                 .getFirst("sessionId");
         if (sessionId == null || sessionId.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "WebSocket 연결에 sessionId가 필요합니다.");
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "WebSocket 연결에는 sessionId가 필요합니다.");
         }
         return sessionId;
     }
@@ -187,13 +236,13 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
     private String getBoundSessionId(WebSocketSession session) {
         Object sessionId = session.getAttributes().get(SESSION_ID_ATTRIBUTE);
         if (sessionId == null) {
-            throw new BusinessException(ErrorCode.CALL_SESSION_NOT_FOUND, "WebSocket에 연결된 통화 세션이 없습니다.");
+            throw new BusinessException(ErrorCode.CALL_SESSION_NOT_FOUND, "WebSocket 연결에 바인딩된 통화 세션이 없습니다.");
         }
         return sessionId.toString();
     }
 
     private void sendEvent(WebSocketSession session, VictimServerEvent event) throws IOException {
-        // 동일 연결에서 여러 서버 이벤트가 이어질 수 있어 sendMessage는 세션 단위로 직렬화한다.
+        // 동일 연결에서 여러 서버 이벤트가 연속 전송될 수 있어 세션 단위 직렬화를 적용한다.
         synchronized (session) {
             if (session.isOpen()) {
                 session.sendMessage(new TextMessage(objectMapper.writeValueAsString(event)));

@@ -1,4 +1,4 @@
-package com.ssairen.backend.domain.callsession.dto;
+package com.ssairen.backend.domain.callsession.websocket.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.OffsetDateTime;
