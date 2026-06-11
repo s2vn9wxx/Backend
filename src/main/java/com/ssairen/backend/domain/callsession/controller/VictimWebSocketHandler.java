@@ -24,6 +24,10 @@ import org.springframework.web.util.UriComponentsBuilder;
 @Component
 public class VictimWebSocketHandler extends TextWebSocketHandler {
 
+    /*
+     * WebSocket 연결 객체는 메모리 안에서만 살아 있으므로
+     * 연결 직후 세션 attribute에 callSessionId를 묶어 이후 메시지의 소속 세션을 검증한다.
+     */
     private static final String SESSION_ID_ATTRIBUTE = "callSessionId";
 
     private final ObjectMapper objectMapper;
@@ -40,6 +44,7 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
         CallSessionResponse callSession = callSessionService.getSession(callSessionId);
         session.getAttributes().put(SESSION_ID_ATTRIBUTE, callSessionId);
 
+        // Flutter는 이 값을 기준으로 끊긴 지점부터 안전하게 재전송할 수 있다.
         sendEvent(session, VictimServerEvent.of(
                 "SESSION_READY",
                 callSessionId,
@@ -79,6 +84,7 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
         TranscriptChunkPayload payload = objectMapper.treeToValue(event.data(), TranscriptChunkPayload.class);
         validateTranscriptPayload(payload);
 
+        // 저장, sequence 증가, case 진행 시간 반영은 모두 서비스 계층에서 처리한다.
         TranscriptAcceptResult result = callSessionService.acceptTranscript(
                 event.sessionId(),
                 payload.chunkId(),
@@ -108,6 +114,10 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "통화 종료 데이터가 올바르지 않습니다.");
         }
 
+        /*
+         * 종료 ACK에는 세션 상태와 함께
+         * 마지막 분석이 필요한지 여부도 넣어 Flutter가 후속 상태를 표현할 수 있게 한다.
+         */
         SessionCompletionResult result = callSessionService.completeSession(
                 event.sessionId(),
                 payload.endedAt(),
@@ -183,6 +193,7 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void sendEvent(WebSocketSession session, VictimServerEvent event) throws IOException {
+        // 동일 연결에서 여러 서버 이벤트가 이어질 수 있어 sendMessage는 세션 단위로 직렬화한다.
         synchronized (session) {
             if (session.isOpen()) {
                 session.sendMessage(new TextMessage(objectMapper.writeValueAsString(event)));

@@ -10,6 +10,8 @@ import com.ssairen.backend.domain.callsession.dto.TranscriptAcceptResult;
 import com.ssairen.backend.domain.callsession.entity.CallSessionStatus;
 import com.ssairen.backend.domain.callsession.repository.CallSessionRepository;
 import com.ssairen.backend.domain.callsession.repository.TranscriptChunkRepository;
+import com.ssairen.backend.domain.casefile.repository.FraudCaseRepository;
+import com.ssairen.backend.domain.user.repository.UserRepository;
 import com.ssairen.backend.global.error.BusinessException;
 import com.ssairen.backend.global.error.ErrorCode;
 import java.time.OffsetDateTime;
@@ -30,10 +32,18 @@ class CallSessionServiceTest {
     @Autowired
     private TranscriptChunkRepository transcriptChunkRepository;
 
+    @Autowired
+    private FraudCaseRepository fraudCaseRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
     @BeforeEach
     void clearDatabase() {
         transcriptChunkRepository.deleteAll();
         callSessionRepository.deleteAll();
+        fraudCaseRepository.deleteAll();
+        userRepository.deleteAll();
     }
 
     @Test
