@@ -9,9 +9,11 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
+import lombok.Getter;
 
 @Entity
 @Table(name = "frozen_accounts")
+@Getter
 public class FrozenAccount {
 
     @Id

@@ -4,8 +4,6 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
@@ -15,24 +13,24 @@ import java.time.OffsetDateTime;
 public class User {
 
     /*
-     * users는 피해자와 보호자를 함께 담는 공용 테이블이다.
-     * 실제 역할 차이는 role enum과 pairings 같은 연결 테이블에서 구분한다.
+     * MVP 단계에서는 Flutter가 하드코딩된 userId를 보낼 수 있도록
+     * user_id 를 서버 더미 데이터 기준으로 고정 주입 가능하게 설계한다.
      */
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "user_id")
     private Long id;
 
-    @Column(nullable = false, length = 50)
+    @Column(name = "name", nullable = false, length = 50)
     private String name;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(name = "role", nullable = false, length = 20)
     private UserRole role;
 
+    @Column(name = "age")
     private Integer age;
 
-    @Column(length = 20)
+    @Column(name = "phone", length = 20)
     private String phone;
 
     @Column(name = "fcm_token", length = 255)
@@ -45,16 +43,40 @@ public class User {
     }
 
     public User(String name, UserRole role, Integer age, String phone) {
-        // 생성 시점에는 이름/역할/기본 프로필만 있어도 row를 만들 수 있게 둔다.
+        this(null, name, role, age, phone, null, OffsetDateTime.now());
+    }
+
+    private User(
+            Long id,
+            String name,
+            UserRole role,
+            Integer age,
+            String phone,
+            String fcmToken,
+            OffsetDateTime createdAt
+    ) {
+        this.id = id;
         this.name = name;
         this.role = role;
         this.age = age;
         this.phone = phone;
-        this.createdAt = OffsetDateTime.now();
+        this.fcmToken = fcmToken;
+        this.createdAt = createdAt;
+    }
+
+    public static User mvpPreset(
+            Long userId,
+            String name,
+            UserRole role,
+            Integer age,
+            String phone,
+            String fcmToken,
+            OffsetDateTime createdAt
+    ) {
+        return new User(userId, name, role, age, phone, fcmToken, createdAt);
     }
 
     public void updateVictimProfile(Integer age, String phone) {
-        // 같은 피해자가 다시 들어오면 최신 프로필 정보로 보정한다.
         this.age = age;
         this.phone = phone;
     }
@@ -77,5 +99,9 @@ public class User {
 
     public String getPhone() {
         return phone;
+    }
+
+    public String getFcmToken() {
+        return fcmToken;
     }
 }
