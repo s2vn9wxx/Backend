@@ -12,6 +12,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.Getter;
+
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -101,7 +103,21 @@ public class FraudCase {
         this.aiSummary = aiSummary;
         this.keywords = (keywords == null || keywords.isEmpty()) ? null : String.join(",", keywords);
     }
-
+    public void updateStatus(CaseStatus status, OffsetDateTime changedAt) {
+        /*
+         * 대시보드에서의 수동 상태 변경.
+         * 완료로 전환되면 응답 시각이 비어있을 때만 채우고,
+         * 다시 진행중으로 되돌리면 응답 시각을 초기화한다.
+         */
+        this.status = status;
+        if (status == CaseStatus.COMPLETED) {
+            if (this.respondedAt == null) {
+                this.respondedAt = changedAt;
+            }
+        } else {
+            this.respondedAt = null;
+        }
+    }
     public void complete(OffsetDateTime startedAt, OffsetDateTime endedAt) {
         this.status = CaseStatus.COMPLETED;
         this.respondedAt = endedAt;
