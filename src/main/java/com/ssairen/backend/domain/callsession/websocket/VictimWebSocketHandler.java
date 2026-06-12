@@ -1,19 +1,22 @@
-package com.ssairen.backend.domain.callsession.controller;
+package com.ssairen.backend.domain.callsession.websocket;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ssairen.backend.domain.callsession.dto.CallSessionResponse;
-import com.ssairen.backend.domain.callsession.dto.SessionCompletePayload;
-import com.ssairen.backend.domain.callsession.dto.SessionCompletionResult;
-import com.ssairen.backend.domain.callsession.dto.TranscriptAcceptResult;
-import com.ssairen.backend.domain.callsession.dto.TranscriptChunkPayload;
-import com.ssairen.backend.domain.callsession.dto.VictimClientEvent;
-import com.ssairen.backend.domain.callsession.dto.VictimServerEvent;
-import com.ssairen.backend.domain.callsession.service.CallSessionService;
+import com.ssairen.backend.domain.callsession.analysis.TranscriptAnalysisService;
+import com.ssairen.backend.domain.callsession.analysis.dto.TranscriptAnalysisResult;
+import com.ssairen.backend.domain.callsession.api.dto.CallSessionResponse;
+import com.ssairen.backend.domain.callsession.api.dto.SessionCompletionResult;
+import com.ssairen.backend.domain.callsession.application.CallSessionService;
+import com.ssairen.backend.domain.callsession.websocket.dto.SessionCompletePayload;
+import com.ssairen.backend.domain.callsession.websocket.dto.TranscriptAcceptResult;
+import com.ssairen.backend.domain.callsession.websocket.dto.TranscriptChunkPayload;
+import com.ssairen.backend.domain.callsession.websocket.dto.VictimClientEvent;
+import com.ssairen.backend.domain.callsession.websocket.dto.VictimServerEvent;
 import com.ssairen.backend.global.error.BusinessException;
 import com.ssairen.backend.global.error.ErrorCode;
 import java.io.IOException;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -22,20 +25,27 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
+@Slf4j
 public class VictimWebSocketHandler extends TextWebSocketHandler {
 
     /*
-     * WebSocket 연결 객체는 메모리 안에서만 살아 있으므로
-     * 연결 직후 세션 attribute에 callSessionId를 묶어 이후 메시지의 소속 세션을 검증한다.
+     * 연결된 WebSocket과 통화 세션을 바인딩하기 위해
+     * handshake 직후 session attribute에 callSessionId를 저장한다.
      */
     private static final String SESSION_ID_ATTRIBUTE = "callSessionId";
 
     private final ObjectMapper objectMapper;
     private final CallSessionService callSessionService;
+    private final TranscriptAnalysisService transcriptAnalysisService;
 
-    public VictimWebSocketHandler(ObjectMapper objectMapper, CallSessionService callSessionService) {
+    public VictimWebSocketHandler(
+            ObjectMapper objectMapper,
+            CallSessionService callSessionService,
+            TranscriptAnalysisService transcriptAnalysisService
+    ) {
         this.objectMapper = objectMapper;
         this.callSessionService = callSessionService;
+        this.transcriptAnalysisService = transcriptAnalysisService;
     }
 
     @Override
@@ -44,7 +54,18 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
         CallSessionResponse callSession = callSessionService.getSession(callSessionId);
         session.getAttributes().put(SESSION_ID_ATTRIBUTE, callSessionId);
 
-        // Flutter는 이 값을 기준으로 끊긴 지점부터 안전하게 재전송할 수 있다.
+        log.debug(
+                "Flutter WebSocket connected. sessionId={}, socketId={}, remoteAddress={}",
+                callSessionId,
+                session.getId(),
+                session.getRemoteAddress()
+        );
+
+        /*
+         * 프론트는 이 응답을 기준으로 다음에 보내야 할 sequence를 맞춰야 한다.
+         * 재연결 상황에서도 서버가 기대하는 sequence를 다시 전달하기 위해
+         * 연결 직후 SESSION_READY를 항상 내려준다.
+         */
         sendEvent(session, VictimServerEvent.of(
                 "SESSION_READY",
                 callSessionId,
@@ -57,6 +78,13 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
         String callSessionId = getBoundSessionId(session);
 
         try {
+            log.debug(
+                    "Received Flutter WebSocket message. sessionId={}, socketId={}, payload={}",
+                    callSessionId,
+                    session.getId(),
+                    message.getPayload()
+            );
+
             VictimClientEvent event = objectMapper.readValue(message.getPayload(), VictimClientEvent.class);
             validateEnvelope(event, callSessionId);
 
@@ -84,7 +112,10 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
         TranscriptChunkPayload payload = objectMapper.treeToValue(event.data(), TranscriptChunkPayload.class);
         validateTranscriptPayload(payload);
 
-        // 저장, sequence 증가, case 진행 시간 반영은 모두 서비스 계층에서 처리한다.
+        /*
+         * transcript 저장과 sequence 검증은 세션 서비스에서 수행한다.
+         * 성공하면 먼저 ACK를 반환하고, 그 다음 FastAPI 분석 결과를 내려준다.
+         */
         TranscriptAcceptResult result = callSessionService.acceptTranscript(
                 event.sessionId(),
                 payload.chunkId(),
@@ -106,6 +137,40 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
                         "analysisThresholdReached", result.analysisThresholdReached()
                 )
         ));
+
+        try {
+            TranscriptAnalysisResult analysisResult = transcriptAnalysisService.analyzeWebSocketChunk(
+                    event.sessionId(),
+                    payload.sequence(),
+                    payload.text()
+            );
+
+            sendEvent(session, VictimServerEvent.of(
+                    "ANALYSIS_RESULT",
+                    event.sessionId(),
+                    Map.of(
+                            "chunkId", payload.chunkId(),
+                            "sequence", payload.sequence(),
+                            "riskScore", analysisResult.riskScore(),
+                            "phishingType", analysisResult.phishingType(),
+                            "aiSummary", analysisResult.aiSummary(),
+                            "keywords", analysisResult.keywords(),
+                            "provider", analysisResult.provider()
+                    )
+            ));
+        } catch (BusinessException exception) {
+            sendEvent(session, VictimServerEvent.of(
+                    "ANALYSIS_ERROR",
+                    event.sessionId(),
+                    Map.of(
+                            "chunkId", payload.chunkId(),
+                            "sequence", payload.sequence(),
+                            "reason", exception.getErrorCode().name(),
+                            "message", exception.getMessage(),
+                            "details", exception.getDetails()
+                    )
+            ));
+        }
     }
 
     private void handleSessionComplete(WebSocketSession session, VictimClientEvent event) throws IOException {
@@ -114,10 +179,6 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "통화 종료 데이터가 올바르지 않습니다.");
         }
 
-        /*
-         * 종료 ACK에는 세션 상태와 함께
-         * 마지막 분석이 필요한지 여부도 넣어 Flutter가 후속 상태를 표현할 수 있게 한다.
-         */
         SessionCompletionResult result = callSessionService.completeSession(
                 event.sessionId(),
                 payload.endedAt(),
@@ -179,7 +240,7 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
                 .getQueryParams()
                 .getFirst("sessionId");
         if (sessionId == null || sessionId.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "WebSocket 연결에 sessionId가 필요합니다.");
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "WebSocket 연결에는 sessionId가 필요합니다.");
         }
         return sessionId;
     }
@@ -187,24 +248,50 @@ public class VictimWebSocketHandler extends TextWebSocketHandler {
     private String getBoundSessionId(WebSocketSession session) {
         Object sessionId = session.getAttributes().get(SESSION_ID_ATTRIBUTE);
         if (sessionId == null) {
-            throw new BusinessException(ErrorCode.CALL_SESSION_NOT_FOUND, "WebSocket에 연결된 통화 세션이 없습니다.");
+            throw new BusinessException(ErrorCode.CALL_SESSION_NOT_FOUND, "WebSocket 연결에 바인딩된 통화 세션이 없습니다.");
         }
         return sessionId.toString();
     }
 
     private void sendEvent(WebSocketSession session, VictimServerEvent event) throws IOException {
-        // 동일 연결에서 여러 서버 이벤트가 이어질 수 있어 sendMessage는 세션 단위로 직렬화한다.
         synchronized (session) {
             if (session.isOpen()) {
-                session.sendMessage(new TextMessage(objectMapper.writeValueAsString(event)));
+                String payload = objectMapper.writeValueAsString(event);
+                log.debug(
+                        "Sending WebSocket message to Flutter. sessionId={}, socketId={}, eventType={}, payload={}",
+                        event.sessionId(),
+                        session.getId(),
+                        event.eventType(),
+                        payload
+                );
+                session.sendMessage(new TextMessage(payload));
             }
         }
     }
 
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+        log.debug(
+                "Flutter WebSocket transport error. sessionId={}, socketId={}, message={}",
+                session.getAttributes().get(SESSION_ID_ATTRIBUTE),
+                session.getId(),
+                exception.getMessage(),
+                exception
+        );
         if (session.isOpen()) {
             session.close(CloseStatus.SERVER_ERROR);
         }
+    }
+
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
+        log.debug(
+                "Flutter WebSocket closed. sessionId={}, socketId={}, closeCode={}, reason={}",
+                session.getAttributes().get(SESSION_ID_ATTRIBUTE),
+                session.getId(),
+                status.getCode(),
+                status.getReason()
+        );
+        super.afterConnectionClosed(session, status);
     }
 }

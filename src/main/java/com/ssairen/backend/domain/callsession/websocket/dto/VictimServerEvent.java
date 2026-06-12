@@ -1,4 +1,4 @@
-package com.ssairen.backend.domain.callsession.dto;
+package com.ssairen.backend.domain.callsession.websocket.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.OffsetDateTime;
@@ -11,7 +11,15 @@ public record VictimServerEvent(
 
         @Schema(
                 description = "서버 이벤트 종류",
-                allowableValues = {"SESSION_READY", "TRANSCRIPT_ACK", "TRANSCRIPT_NACK", "SESSION_COMPLETE_ACK", "PONG"},
+                allowableValues = {
+                        "SESSION_READY",
+                        "TRANSCRIPT_ACK",
+                        "TRANSCRIPT_NACK",
+                        "ANALYSIS_RESULT",
+                        "ANALYSIS_ERROR",
+                        "SESSION_COMPLETE_ACK",
+                        "PONG"
+                },
                 example = "TRANSCRIPT_ACK"
         )
         String eventType,

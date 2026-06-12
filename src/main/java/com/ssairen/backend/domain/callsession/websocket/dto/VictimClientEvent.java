@@ -1,4 +1,4 @@
-package com.ssairen.backend.domain.callsession.dto;
+package com.ssairen.backend.domain.callsession.websocket.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
