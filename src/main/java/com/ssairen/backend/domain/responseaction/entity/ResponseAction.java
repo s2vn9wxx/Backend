@@ -13,9 +13,11 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
+import lombok.Getter;
 
 @Entity
 @Table(name = "response_actions")
+@Getter
 public class ResponseAction {
 
     @Id

@@ -19,6 +19,7 @@ import java.util.List;
 
 @Entity
 @Table(name = "cases")
+@Getter
 public class FraudCase {
 
     /*
