@@ -10,4 +10,6 @@ public interface FraudCaseRepository extends JpaRepository<FraudCase, Long> {
     List<FraudCase> findByStatusOrderByDetectedAtDesc(CaseStatus status);
 
     List<FraudCase> findAllByOrderByDetectedAtDesc();
+
+    long countByStatus(CaseStatus status);
 }

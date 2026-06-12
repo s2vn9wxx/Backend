@@ -95,6 +95,22 @@ public class FraudCase {
         }
     }
 
+    public void updateStatus(CaseStatus status, OffsetDateTime changedAt) {
+        /*
+         * 대시보드에서의 수동 상태 변경.
+         * 완료로 전환되면 응답 시각이 비어있을 때만 채우고,
+         * 다시 진행중으로 되돌리면 응답 시각을 초기화한다.
+         */
+        this.status = status;
+        if (status == CaseStatus.COMPLETED) {
+            if (this.respondedAt == null) {
+                this.respondedAt = changedAt;
+            }
+        } else {
+            this.respondedAt = null;
+        }
+    }
+
     public void complete(OffsetDateTime startedAt, OffsetDateTime endedAt) {
         /*
          * ERD의 responded_at은 현재 구현에서
