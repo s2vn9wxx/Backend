@@ -25,34 +25,34 @@ public class SwaggerConfig {
                 .info(new Info()
                         .title("SSAIREN Flutter - Spring Boot API")
                         .description("""
-                                Flutter 피해자 앱과 Spring Boot 사이의 통화 모니터링 계약 문서입니다.
+                                Flutter 앱과 Spring Boot 백엔드 사이의 MVP 통신 계약 문서입니다.
 
-                                - REST 1단계: 통화 시작 직후 5초 단위 STT를 REST로 업로드하고 FastAPI 일반 분석 결과를 받습니다.
-                                - WebSocket 2단계: 위험도 상승 이후 실시간 STT를 WebSocket으로 올리고 FastAPI 실시간 분석 결과를 받습니다.
-                                - 관리자 대시보드 및 기타 내부 운영 API는 현재 문서 범위에 포함하지 않습니다.
+                                - REST 1단계: 통화 시작 직후 5초 단위 STT를 REST API로 업로드하고, Spring이 FastAPI 분석 서버에 전달한 뒤 위험도 결과를 Flutter에 반환합니다.
+                                - WebSocket 2단계: REST 분석 결과로 실시간 관찰이 필요하다고 판단되면, Flutter가 WebSocket으로 전환하여 추가 STT를 계속 전송합니다.
+                                - 보호자 알림: 이상도가 임계치를 넘으면 Spring이 현재 userId와 연결된 보호자에게 FCM 알림 전송을 시도합니다.
                                 """)
                         .version("v1.1.0"))
                 .tags(List.of(
-                        new Tag().name("통화 세션").description("세션 생성, 상태 조회, 초기 REST 분석 API"),
-                        new Tag().name("피해자 WebSocket").description("위험도 상승 이후 실시간 STT 업로드 WebSocket 계약")
+                        new Tag().name("통화 세션").description("세션 생성, 세션 상태 조회, 초기 REST 기반 STT 분석 API"),
+                        new Tag().name("피해자 WebSocket").description("REST 분석 이후 실시간 감시 단계에서 사용하는 WebSocket 계약")
                 ))
                 .paths(webSocketPaths());
     }
 
     /**
-     * OpenAPI는 WebSocket 프로토콜을 완전하게 모델링하지 못한다.
-     * 그래서 Flutter 개발자가 handshake 주소와 대표 메시지 예시를 바로 확인할 수 있도록
+     * OpenAPI는 WebSocket 프로토콜 자체를 완전하게 표현하지 못한다.
+     * 그래서 Flutter 개발자가 handshake 주소와 메시지 예시를 바로 확인할 수 있도록
      * 문서 전용 PathItem을 수동으로 추가한다.
      */
     private Paths webSocketPaths() {
         Operation operation = new Operation()
                 .tags(List.of("피해자 WebSocket"))
-                .summary("고위험 단계 STT 실시간 업로드 WebSocket 연결")
+                .summary("실시간 고위험 모니터링용 WebSocket 연결")
                 .description("""
                         연결 주소: `ws://{host}/ws/v1/victim?sessionId={sessionId}`
 
-                        이 경로는 REST 초기 분석 단계에서 위험도가 특정 threshold 이상일 때 사용합니다.
-                        연결 직후 서버는 `SESSION_READY` 이벤트로 다음 STT sequence를 내려줍니다.
+                        이 경로는 REST 초기 분석 응답에서 `shouldOpenWebSocket` 값이 `true`일 때 사용합니다.
+                        연결 직후 서버는 `SESSION_READY` 이벤트로 다음에 받아야 하는 STT sequence를 알려줍니다.
                         Flutter는 `TRANSCRIPT_CHUNK`, `SESSION_COMPLETE`, `PING` 이벤트를 전송합니다.
                         서버는 `TRANSCRIPT_ACK`, `TRANSCRIPT_NACK`, `ANALYSIS_RESULT`, `ANALYSIS_ERROR`, `SESSION_COMPLETE_ACK`, `PONG` 이벤트를 반환합니다.
                         """)
@@ -64,7 +64,7 @@ public class SwaggerConfig {
                         .example("550e8400-e29b-41d4-a716-446655440000"))
                 .responses(new ApiResponses()
                         .addApiResponse("101", new ApiResponse()
-                                .description("WebSocket 연결 성공")
+                                .description("WebSocket handshake 성공")
                                 .content(new Content().addMediaType(
                                         "application/json",
                                         new MediaType()
@@ -73,14 +73,14 @@ public class SwaggerConfig {
                                                 .addExamples("Flutter -> SpringBoot: SESSION_COMPLETE", sessionCompleteExample())
                                 )))
                         .addApiResponse("400", new ApiResponse().description("sessionId 누락 또는 잘못된 handshake 요청"))
-                        .addApiResponse("404", new ApiResponse().description("통화 세션을 찾을 수 없음")));
+                        .addApiResponse("404", new ApiResponse().description("해당 통화 세션을 찾을 수 없음")));
 
         return new Paths().addPathItem("/ws/v1/victim", new PathItem().get(operation));
     }
 
     private Example transcriptChunkExample() {
         return new Example()
-                .summary("실시간 STT 청크 전송")
+                .summary("실시간 STT 청크 전송 예시")
                 .value("""
                         {
                           "eventId": "event-001",
@@ -90,7 +90,7 @@ public class SwaggerConfig {
                           "data": {
                             "chunkId": "chunk-001",
                             "sequence": 8,
-                            "text": "검찰 수사관입니다. 지금 앱을 설치하세요.",
+                            "text": "검찰입니다. 지금 앱을 설치하고 인증번호를 입력하세요.",
                             "startedAtMs": 35000,
                             "endedAtMs": 40000,
                             "isFinal": true
@@ -101,7 +101,7 @@ public class SwaggerConfig {
 
     private Example transcriptAckExample() {
         return new Example()
-                .summary("실시간 STT 저장 ACK")
+                .summary("실시간 STT 수신 ACK 예시")
                 .value("""
                         {
                           "eventId": "server-event-001",
@@ -121,7 +121,7 @@ public class SwaggerConfig {
 
     private Example sessionCompleteExample() {
         return new Example()
-                .summary("마지막 실시간 청크 이후 통화 종료 요청")
+                .summary("통화 종료 알림 예시")
                 .value("""
                         {
                           "eventId": "event-002",
