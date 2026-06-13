@@ -20,7 +20,7 @@ spring:
 
 ssairen:
   websocket:
-    allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:*}
+    allowed-origins: "*"
   analysis:
     provider: ${SSAIREN_ANALYSIS_PROVIDER:mock-open-api}
     websocket-escalation-threshold: ${SSAIREN_WEBSOCKET_ESCALATION_THRESHOLD:70}
@@ -46,3 +46,4 @@ springdoc:
 
 server:
   port: 8080
+  forward-headers-strategy: framework
