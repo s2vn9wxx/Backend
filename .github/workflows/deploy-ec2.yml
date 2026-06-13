@@ -23,7 +23,12 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew clean build
-          cp build/libs/*.jar app.jar
+          JAR_FILE=$(find build/libs -maxdepth 1 -type f -name "*.jar" ! -name "*-plain.jar" | head -n 1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "Executable jar not found in build/libs"
+            exit 1
+          fi
+          cp "$JAR_FILE" app.jar
 
       - name: Copy artifact to EC2
         uses: appleboy/scp-action@v0.1.7
